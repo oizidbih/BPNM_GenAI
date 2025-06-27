@@ -1,0 +1,76 @@
+.App {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+}
+
+.bpmn-container {
+  display: flex;
+  flex: 1;
+}
+
+.bpmn-viewer {
+  flex: 3;
+  border: 1px solid #ccc;
+}
+
+.chat-panel {
+  flex: 1;
+  border: 1px solid #ccc;
+  display: flex;
+  flex-direction: column;
+  padding: 10px;
+}
+
+.chat-messages {
+  flex: 1;
+  overflow-y: auto;
+  margin-bottom: 10px;
+  border: 1px solid #eee;
+  padding: 5px;
+}
+
+.chat-message {
+  margin-bottom: 5px;
+}
+
+.chat-message.user {
+  text-align: right;
+  color: blue;
+}
+
+.chat-message.llm {
+  text-align: left;
+  color: green;
+}
+
+.chat-input {
+  display: flex;
+}
+
+.chat-input input {
+  flex: 1;
+  padding: 8px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  margin-right: 5px;
+}
+
+.chat-input button {
+  padding: 8px 12px;
+  background-color: #007bff;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.chat-input button:hover {
+  background-color: #0056b3;
+}
+
+.selected-elements {
+  margin-top: 10px;
+  font-size: 0.9em;
+  color: #555;
+}
