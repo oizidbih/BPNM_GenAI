@@ -1,9 +1,29 @@
+// Load environment variables first
+require('dotenv').config();
+
 const express = require('express');
 const cors = require('cors');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 
+// Import Sentry configuration
+const { 
+  initSentry, 
+  sentryRequestHandler, 
+  sentryTracingHandler, 
+  sentryErrorHandler,
+  captureException,
+  captureMessage 
+} = require('./sentry.config');
+
 const app = express();
-const port = 3001;
+const port = process.env.PORT || 3001;
+
+// Initialize Sentry (must be done before other middleware)
+initSentry(app);
+
+// Sentry request handling middleware (must be first)
+app.use(sentryRequestHandler());
+app.use(sentryTracingHandler());
 
 app.use(cors());
 app.use(express.json());
@@ -138,6 +158,15 @@ Example JSON response structure:
 
   } catch (error) {
     console.error('Error communicating with Gemini API:', error);
+    
+    // Capture error in Sentry with context
+    captureException(error, {
+      api_endpoint: '/api/chat',
+      user_prompt: prompt,
+      selected_elements: selectedElementIds,
+      diagram_length: diagramXML?.length || 0
+    });
+    
     res.status(500).json({
       response: 'Error: Failed to get response from AI.',
       updatedDiagramXML: diagramXML,
@@ -145,6 +174,25 @@ Example JSON response structure:
   }
 });
 
+// Sentry error handler (must be before other error handlers)
+app.use(sentryErrorHandler());
+
+// Global error handler
+app.use((error, req, res, next) => {
+  console.error('Unhandled error:', error);
+  res.status(500).json({
+    error: 'Internal server error',
+    message: process.env.NODE_ENV === 'development' ? error.message : 'Something went wrong'
+  });
+});
+
 app.listen(port, () => {
-  console.log(`Backend listening at http://localhost:${port}`);
+  console.log(`🚀 Backend listening at http://localhost:${port}`);
+  console.log(`📊 Environment: ${process.env.NODE_ENV || 'development'}`);
+  
+  // Log successful startup to Sentry
+  captureMessage(`Backend server started successfully on port ${port}`, 'info', {
+    port: port,
+    environment: process.env.NODE_ENV || 'development'
+  });
 });

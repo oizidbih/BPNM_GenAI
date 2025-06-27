@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import BpmnJS from 'bpmn-js/lib/Modeler'; // Changed from Viewer to Modeler
 
 import './App.css';
+import { captureException, captureMessage, addBreadcrumb, SentryErrorBoundary } from './sentry';
 import 'bpmn-js/dist/assets/diagram-js.css'; // Modeler CSS
 import 'bpmn-js/dist/assets/bpmn-font/css/bpmn.css'; // Modeler CSS
 import 'bpmn-js/dist/assets/bpmn-font/css/bpmn-codes.css'; // Modeler CSS
@@ -104,6 +105,17 @@ function App() {
 
     const userMessage = { sender: 'user', text: chatInput };
     setChatMessages((prevMessages) => [...prevMessages, userMessage]);
+    
+    // Add breadcrumb for debugging
+    addBreadcrumb({
+      message: 'User sent chat message',
+      category: 'user_interaction',
+      data: {
+        message_length: chatInput.length,
+        selected_elements_count: selectedElements.length
+      }
+    });
+    
     setChatInput('');
 
     try {
@@ -127,42 +139,60 @@ function App() {
 
     } catch (error) {
       console.error('Error sending chat message:', error);
+      
+      // Capture error in Sentry with context
+      captureException(error, {
+        component: 'chat',
+        action: 'send_message',
+        user_prompt: chatInput,
+        selected_elements: selectedElements,
+        backend_url: 'http://localhost:3001/api/chat'
+      });
+      
       setChatMessages((prevMessages) => [...prevMessages, { sender: 'llm', text: 'Error: Could not connect to backend.' }]);
     }
   };
 
   return (
-    <div className="App">
-      <div className="bpmn-container">
-        <div ref={bpmnViewerRef} className="bpmn-viewer"></div>
-        <div className="chat-panel">
-          <div className="chat-messages">
-            {chatMessages.map((message, index) => (
-              <div key={index} className={`chat-message ${message.sender}`}>
-                <strong>{message.sender}:</strong> {message.text}
-              </div>
-            ))}
-          </div>
-          <div className="chat-input">
-            <input
-              type="text"
-              placeholder="Chat with the diagram..."
-              value={chatInput}
-              onChange={handleChatInputChange}
-              onKeyPress={(e) => {
-                if (e.key === 'Enter') {
-                  handleChatSubmit();
-                }
-              }}
-            />
-            <button onClick={handleChatSubmit}>Send</button>
-          </div>
-          <div className="selected-elements">
-            Selected Elements: {selectedElements.length > 0 ? selectedElements.join(', ') : 'None'}
+    <SentryErrorBoundary fallback={({ error, resetError }) => (
+      <div style={{ padding: '20px', textAlign: 'center' }}>
+        <h2>Something went wrong</h2>
+        <p>{error.message}</p>
+        <button onClick={resetError}>Try again</button>
+      </div>
+    )}>
+      <div className="App">
+        <div className="bpmn-container">
+          <div ref={bpmnViewerRef} className="bpmn-viewer"></div>
+          <div className="chat-panel">
+            <div className="chat-messages">
+              {chatMessages.map((message, index) => (
+                <div key={index} className={`chat-message ${message.sender}`}>
+                  <strong>{message.sender}:</strong> {message.text}
+                </div>
+              ))}
+            </div>
+            <div className="chat-input">
+              <input
+                type="text"
+                placeholder="Chat with the diagram..."
+                value={chatInput}
+                onChange={handleChatInputChange}
+                onKeyPress={(e) => {
+                  if (e.key === 'Enter') {
+                    handleChatSubmit();
+                  }
+                }}
+              />
+              <button onClick={handleChatSubmit}>Send</button>
+            </div>
+            <div className="selected-elements">
+              Selected Elements: {selectedElements.length > 0 ? selectedElements.join(', ') : 'None'}
+            </div>
           </div>
         </div>
       </div>
-    </div>
+    </SentryErrorBoundary>
   );
 }
 
