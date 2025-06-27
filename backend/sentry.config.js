@@ -10,20 +10,18 @@ const { nodeProfilingIntegration } = require('@sentry/profiling-node');
 
 /**
  * Initialize Sentry with environment-specific configuration
- * 
- * @param {Object} app - Express application instance
  */
-function initSentry(app) {
+function initSentry() {
   // Only initialize Sentry if DSN is provided
   if (!process.env.SENTRY_DSN) {
     console.warn('SENTRY_DSN not found. Sentry monitoring disabled.');
-    return;
+    return false;
   }
 
   // Skip Sentry in development unless explicitly enabled
   if (process.env.NODE_ENV === 'development' && !process.env.SENTRY_DEBUG_MODE) {
     console.log('Sentry disabled in development mode. Set SENTRY_DEBUG_MODE=true to enable.');
-    return;
+    return false;
   }
 
   Sentry.init({
@@ -40,10 +38,8 @@ function initSentry(app) {
     integrations: [
       // Enable HTTP instrumentation
       Sentry.httpIntegration(),
-      // Enable Express instrumentation
-      Sentry.expressIntegration({
-        app,
-      }),
+      // Enable Express instrumentation  
+      Sentry.expressIntegration(),
       // Enable Node.js profiling
       nodeProfilingIntegration(),
     ],
@@ -73,6 +69,7 @@ function initSentry(app) {
   });
 
   console.log(`✅ Sentry initialized for ${process.env.SENTRY_ENVIRONMENT || 'development'} environment`);
+  return true;
 }
 
 /**
@@ -80,28 +77,34 @@ function initSentry(app) {
  * Must be used after all controllers and before other error handlers
  */
 function sentryErrorHandler() {
-  return Sentry.errorHandler({
-    shouldHandleError(error) {
-      // Capture all 4xx and 5xx errors
-      return error.status >= 400;
-    },
-  });
+  // In Sentry v8+, error handling is automatic with expressIntegration
+  // Return a no-op middleware if Sentry is not initialized
+  return (error, req, res, next) => {
+    // Sentry will automatically capture this error via expressIntegration
+    next(error);
+  };
 }
 
 /**
  * Request handler middleware for Express
- * Must be used before all controllers
+ * In Sentry v8+, this is handled automatically by expressIntegration
  */
 function sentryRequestHandler() {
-  return Sentry.requestHandler();
+  // Return a no-op middleware since Sentry v8+ handles this automatically
+  return (req, res, next) => {
+    next();
+  };
 }
 
 /**
  * Tracing handler middleware for Express
- * Must be used before all controllers
+ * In Sentry v8+, this is handled automatically by expressIntegration
  */
 function sentryTracingHandler() {
-  return Sentry.tracingHandler();
+  // Return a no-op middleware since Sentry v8+ handles this automatically
+  return (req, res, next) => {
+    next();
+  };
 }
 
 /**

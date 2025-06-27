@@ -19,11 +19,13 @@ const app = express();
 const port = process.env.PORT || 3001;
 
 // Initialize Sentry (must be done before other middleware)
-initSentry(app);
+const sentryEnabled = initSentry();
 
-// Sentry request handling middleware (must be first)
-app.use(sentryRequestHandler());
-app.use(sentryTracingHandler());
+// Sentry middleware (automatic in v8+ but keeping for compatibility)
+if (sentryEnabled) {
+  app.use(sentryRequestHandler());
+  app.use(sentryTracingHandler());
+}
 
 app.use(cors());
 app.use(express.json());
@@ -174,8 +176,10 @@ Example JSON response structure:
   }
 });
 
-// Sentry error handler (must be before other error handlers)
-app.use(sentryErrorHandler());
+// Sentry error handler (automatic in v8+ but keeping for compatibility)
+if (sentryEnabled) {
+  app.use(sentryErrorHandler());
+}
 
 // Global error handler
 app.use((error, req, res, next) => {
