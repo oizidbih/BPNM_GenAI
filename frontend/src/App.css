@@ -69,6 +69,28 @@
   background-color: #0056b3;
 }
 
+.chat-input button:disabled {
+  background-color: #ccc;
+  cursor: not-allowed;
+}
+
+.chat-input button:disabled:hover {
+  background-color: #ccc;
+}
+
+.chat-input input:disabled {
+  background-color: #f5f5f5;
+  cursor: not-allowed;
+}
+
+.chat-input button.test-bpmn {
+  background-color: #4CAF50;
+}
+
+.chat-input button.test-bpmn:hover {
+  background-color: #45a049;
+}
+
 .selected-elements {
   margin-top: 10px;
   font-size: 0.9em;
