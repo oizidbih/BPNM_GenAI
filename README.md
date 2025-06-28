@@ -1,11 +1,11 @@
 # BPMN AI Editor
 
-An intelligent BPMN (Business Process Model and Notation) diagram editor powered by Google Gemini AI. This application allows users to create, edit, and modify BPMN diagrams through natural language conversations with an AI assistant.
+An intelligent BPMN (Business Process Model and Notation) diagram editor powered by Anthropic Claude AI. This application allows users to create, edit, and modify BPMN diagrams through natural language conversations with an AI assistant.
 
 ## 🚀 Features
 
 - **Interactive BPMN Editor**: Full-featured BPMN 2.0 compliant diagram editor using bpmn-js
-- **AI-Powered Assistant**: Natural language processing for diagram modifications using Google Gemini
+- **AI-Powered Assistant**: Natural language processing for diagram modifications using Anthropic Claude
 - **Real-time Collaboration**: Chat interface for seamless interaction with the AI
 - **Context-Aware Processing**: AI understands selected elements and provides targeted suggestions
 - **Impact Analysis**: Intelligent analysis of how changes affect the overall process flow
@@ -21,7 +21,7 @@ An intelligent BPMN (Business Process Model and Notation) diagram editor powered
 
 ### Backend (Node.js/Express)
 - Express 5.1.0 server with CORS support
-- Google Gemini AI integration (gemini-1.5-flash model)
+- Anthropic Claude AI integration (claude-3-5-sonnet model)
 - RESTful API for diagram processing
 - JSON-based communication protocol
 
@@ -29,7 +29,7 @@ An intelligent BPMN (Business Process Model and Notation) diagram editor powered
 
 - Node.js (v16 or higher)
 - npm or yarn
-- Google Gemini API key
+- Anthropic Claude API key
 
 ## 🛠️ Installation
 
@@ -55,8 +55,8 @@ An intelligent BPMN (Business Process Model and Notation) diagram editor powered
    
    **Backend (.env file in backend directory):**
    ```bash
-   # Google Gemini AI Configuration
-   GEMINI_API_KEY=your_google_gemini_api_key_here
+   # Anthropic Claude AI Configuration
+   ANTHROPIC_API_KEY=your_anthropic_api_key_here
    
    # Sentry Configuration
    SENTRY_DSN=https://32dc66ac426344352ff8953ddef755c0@o4509520289202176.ingest.de.sentry.io/4509571066822736
@@ -173,7 +173,7 @@ bpmn-ai-editor/
 ### Backend Variables
 | Variable | Description | Required | Default |
 |----------|-------------|----------|---------|
-| `GEMINI_API_KEY` | Google Gemini API key | Yes | - |
+| `ANTHROPIC_API_KEY` | Anthropic Claude API key | Yes | - |
 | `SENTRY_DSN` | Sentry Data Source Name for error tracking | No | - |
 | `SENTRY_ENVIRONMENT` | Environment name for Sentry | No | development |
 | `SENTRY_TRACES_SAMPLE_RATE` | Sampling rate for performance monitoring | No | 1.0 (dev), 0.1 (prod) |
@@ -223,7 +223,7 @@ This project is licensed under the ISC License.
 ## 🙏 Acknowledgments
 
 - [bpmn-js](https://github.com/bpmn-io/bpmn-js) - BPMN 2.0 rendering toolkit
-- [Google Gemini](https://ai.google.dev/) - AI language model
+- [Anthropic Claude](https://www.anthropic.com/) - AI language model
 - [React](https://reactjs.org/) - Frontend framework
 - [Express](https://expressjs.com/) - Backend framework
 

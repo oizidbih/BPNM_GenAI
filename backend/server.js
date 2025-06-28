@@ -3,7 +3,7 @@ require('dotenv').config();
 
 const express = require('express');
 const cors = require('cors');
-const { GoogleGenerativeAI } = require('@google/generative-ai');
+const Anthropic = require('@anthropic-ai/sdk');
 
 // Import Sentry configuration
 const { 
@@ -19,33 +19,121 @@ const {
 const { generateBPMNPrompt } = require('./prompts/bpmn-assistant');
 
 /**
- * Validates basic XML structure
+ * Attempts to fix common XML quote issues
+ * @param {string} xml - The XML string to fix
+ * @returns {string} - Fixed XML string
+ */
+function sanitizeXML(xml) {
+  if (!xml || typeof xml !== 'string') return xml;
+  
+  // Fix common quote issues in attribute values
+  // Replace unescaped quotes within attribute values
+  xml = xml.replace(/="([^"]*)"([^"]*)"([^"]*)"([^"]*)"([^"]*)"([^"]*)"([^>]*)/g, '="$1\'$2\'$3\'$4\'$5\'$6\'$7"');
+  xml = xml.replace(/="([^"]*)"([^"]*)"([^>]*)/g, '="$1\'$2\'$3"');
+  
+  // Fix attributes with missing closing quotes
+  xml = xml.replace(/=("[^"]*[^">])\s*([a-zA-Z])/g, '="$1" $2');
+  
+  return xml;
+}
+
+/**
+ * Provides detailed XML analysis for debugging
+ * @param {string} xml - The XML string to analyze
+ * @returns {string} - Detailed analysis of XML structure
+ */
+function analyzeXMLStructure(xml) {
+  if (!xml) return 'XML is empty';
+  
+  const lines = xml.split('\n');
+  const lastFewLines = lines.slice(-10).join('\n');
+  
+  const selfClosingTags = (xml.match(/<[^>]*\/>/g) || []).length;
+  const allOpenTags = (xml.match(/<[^/!?][^>]*>/g) || []).length;
+  const closeTags = (xml.match(/<\/[^>]*>/g) || []).length;
+  const regularOpenTags = allOpenTags - selfClosingTags;
+  
+  return `XML Analysis:
+- Total lines: ${lines.length}
+- Regular opening tags: ${regularOpenTags}
+- Closing tags: ${closeTags}
+- Self-closing tags: ${selfClosingTags}
+- Last 10 lines:
+${lastFewLines}`;
+}
+
+/**
+ * Validates BPMN XML structure properly
  * @param {string} xml - The XML string to validate
- * @returns {boolean} - True if XML is valid, false otherwise
+ * @returns {object} - {valid: boolean, error: string}
  */
 function validateXMLStructure(xml) {
   try {
     // Check for basic XML structure
-    if (!xml.includes('<bpmn:definitions') || !xml.includes('</bpmn:definitions>')) {
-      return false;
+    if (!xml || typeof xml !== 'string') {
+      return { valid: false, error: 'XML is empty or not a string' };
     }
-    
-    // Check for balanced tags (simple check)
-    const openTags = (xml.match(/<[^/][^>]*>/g) || []).length;
-    const closeTags = (xml.match(/<\/[^>]*>/g) || []).length;
-    
-    if (openTags !== closeTags) {
-      return false;
+
+    if (!xml.includes('<bpmn:definitions') || !xml.includes('</bpmn:definitions>')) {
+      return { valid: false, error: 'Missing BPMN definitions tags' };
     }
     
     // Check for required BPMN elements
     if (!xml.includes('<bpmn:process') || !xml.includes('</bpmn:process>')) {
-      return false;
+      return { valid: false, error: 'Missing BPMN process tags' };
     }
+
+    // Improved tag balance check that handles self-closing tags
+    const selfClosingTags = (xml.match(/<[^>]*\/>/g) || []).length;
+    const allOpenTags = (xml.match(/<[^/!?][^>]*>/g) || []).length; // All opening tags including self-closing
+    const closeTags = (xml.match(/<\/[^>]*>/g) || []).length;
     
-    return true;
+    // Regular opening tags = all opening tags - self-closing tags
+    const regularOpenTags = allOpenTags - selfClosingTags;
+    
+    // For balanced XML: regular opening tags should equal closing tags
+    if (regularOpenTags !== closeTags) {
+      // Find specific unmatched tags for better error reporting
+      const openTagsArray = (xml.match(/<([^/!?][^>\s]*)[^>]*>/g) || []).map(tag => tag.match(/<([^>\s]+)/)[1]);
+      const closeTagsArray = (xml.match(/<\/([^>]+)>/g) || []).map(tag => tag.match(/<\/([^>]+)>/)[1]);
+      const selfClosingArray = (xml.match(/<([^>]*)\s*\/>/g) || []).map(tag => tag.match(/<([^>\s]+)/)[1]);
+      
+      // Remove self-closing tags from open tags
+      const regularOpenArray = openTagsArray.filter(tag => !selfClosingArray.includes(tag));
+      
+      return { 
+        valid: false, 
+        error: `Unbalanced tags: ${regularOpenTags} regular open, ${closeTags} close, ${selfClosingTags} self-closing. Check for unclosed tags near the end of the XML.` 
+      };
+    }
+
+    // Check for common XML syntax errors
+    if (xml.includes('<<') || xml.includes('>>')) {
+      return { valid: false, error: 'Invalid XML syntax: double angle brackets' };
+    }
+
+    // Check for unclosed quotes in attributes (improved)
+    const quoteMatches = xml.match(/="/g);
+    const quoteCount = quoteMatches ? quoteMatches.length : 0;
+    const closingQuotes = (xml.match(/"\s*[/>]/g) || []).length + (xml.match(/"\s*\w/g) || []).length;
+    
+    if (quoteCount !== closingQuotes) {
+      // Try to find the specific problematic attribute
+      const problematicLines = xml.split('\n').filter(line => {
+        const lineQuotes = (line.match(/="/g) || []).length;
+        const lineClosing = (line.match(/"\s*[/>]/g) || []).length + (line.match(/"\s*\w/g) || []).length;
+        return lineQuotes !== lineClosing;
+      });
+      
+      return { 
+        valid: false, 
+        error: `Unclosed quotes in XML attributes. Problematic line(s): ${problematicLines.slice(0, 2).join('; ')}` 
+      };
+    }
+
+    return { valid: true, error: null };
   } catch (error) {
-    return false;
+    return { valid: false, error: `Validation error: ${error.message}` };
   }
 }
 
@@ -65,15 +153,16 @@ app.use(cors());
 app.use(express.json());
 
 // Access your API key as an environment variable (recommended)
-const API_KEY = process.env.GEMINI_API_KEY;
+const API_KEY = process.env.ANTHROPIC_API_KEY;
 
 if (!API_KEY) {
-  console.error('GEMINI_API_KEY environment variable is not set.');
+  console.error('ANTHROPIC_API_KEY environment variable is not set.');
   process.exit(1);
 }
 
-const genAI = new GoogleGenerativeAI(API_KEY);
-const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" }); // Changed model to gemini-1.5-flash
+const anthropic = new Anthropic({
+  apiKey: API_KEY,
+});
 
 app.get('/', (req, res) => {
   res.send('Hello from the backend!');
@@ -133,16 +222,40 @@ app.get('/api/test-bpmn', (req, res) => {
 });
 
 app.post('/api/chat', async (req, res) => {
+  const startTime = Date.now();
   const { diagramXML, selectedElementIds, prompt } = req.body;
+
+  // Add request timeout
+  const timeout = setTimeout(() => {
+    if (!res.headersSent) {
+      res.status(408).json({
+        response: 'Request timeout - AI took too long to respond. Please try again.',
+        updatedDiagramXML: diagramXML,
+      });
+    }
+  }, 30000); // 30 second timeout
 
   const fullPrompt = generateBPMNPrompt(diagramXML, selectedElementIds, prompt);
   
+  console.log(`🚀 Processing request: "${prompt.substring(0, 50)}..." (prompt length: ${fullPrompt.length} chars)`);
+  
   try {
-    const result = await model.generateContent(fullPrompt);
-    const response = await result.response;
-    const text = response.text();
+    const result = await anthropic.messages.create({
+      model: "claude-3-5-sonnet-20241022",
+      max_tokens: 4000,
+      messages: [
+        {
+          role: "user",
+          content: fullPrompt
+        }
+      ]
+    });
+    
+    const text = result.content[0].text;
+    
+    clearTimeout(timeout); // Clear timeout on successful response
 
-    // Attempt to parse the JSON response from Gemini
+    // Attempt to parse the JSON response from Claude
     let llmResponse;
     try {
       // Attempt to extract JSON from markdown code block
@@ -154,7 +267,7 @@ app.post('/api/chat', async (req, res) => {
         llmResponse = JSON.parse(text);
       }
     } catch (parseError) {
-      console.error('Failed to parse Gemini response as JSON:', text);
+      console.error('Failed to parse Claude response as JSON:', text);
       // If parsing fails, treat the entire text as the LLM's response
       llmResponse = {
         updatedDiagramXML: diagramXML, // Return original XML if parsing fails
@@ -173,12 +286,37 @@ app.post('/api/chat', async (req, res) => {
 
     // Validate the generated XML before sending to frontend
     let finalXML = diagramXML; // Default to original XML
-    if (llmResponse.updatedDiagramXML && validateXMLStructure(llmResponse.updatedDiagramXML)) {
-      finalXML = llmResponse.updatedDiagramXML;
-    } else if (llmResponse.updatedDiagramXML) {
-      console.error('Invalid XML generated by AI:', llmResponse.updatedDiagramXML);
-      llmResponse.response = (llmResponse.response || '') + ' [Note: Generated XML was invalid, keeping original diagram]';
+    if (llmResponse.updatedDiagramXML) {
+      let xmlToValidate = llmResponse.updatedDiagramXML;
+      let validation = validateXMLStructure(xmlToValidate);
+      
+      // If validation fails, try to sanitize and validate again
+      if (!validation.valid && validation.error.includes('quote')) {
+        console.log('🔧 Attempting to fix XML quote issues...');
+        xmlToValidate = sanitizeXML(llmResponse.updatedDiagramXML);
+        validation = validateXMLStructure(xmlToValidate);
+        
+        if (validation.valid) {
+          console.log('✅ XML fixed successfully after sanitization');
+        }
+      }
+      
+      if (validation.valid) {
+        finalXML = xmlToValidate;
+        console.log('✅ Generated XML validated successfully');
+      } else {
+        console.error('❌ Invalid XML generated by AI:', {
+          error: validation.error,
+          xmlPreview: llmResponse.updatedDiagramXML.substring(0, 200) + '...',
+          xmlLength: llmResponse.updatedDiagramXML.length
+        });
+        console.error('📊 XML Structure Analysis:', analyzeXMLStructure(llmResponse.updatedDiagramXML));
+        llmResponse.response = (llmResponse.response || '') + ` [Note: Generated XML was invalid (${validation.error}), keeping original diagram]`;
+      }
     }
+
+    const responseTime = Date.now() - startTime;
+    console.log(`✅ Request completed in ${responseTime}ms`);
 
     res.json({
       response: llmResponse.response || llmResponse.impactAnalysis || 'No specific response provided.',
@@ -186,20 +324,25 @@ app.post('/api/chat', async (req, res) => {
     });
 
   } catch (error) {
-    console.error('Error communicating with Gemini API:', error);
+    clearTimeout(timeout); // Clear timeout on error
+    const responseTime = Date.now() - startTime;
+    console.error(`❌ Error after ${responseTime}ms:`, error.message);
     
     // Capture error in Sentry with context
     captureException(error, {
       api_endpoint: '/api/chat',
       user_prompt: prompt,
       selected_elements: selectedElementIds,
-      diagram_length: diagramXML?.length || 0
+      diagram_length: diagramXML?.length || 0,
+      response_time: responseTime
     });
     
-    res.status(500).json({
-      response: 'Error: Failed to get response from AI.',
-      updatedDiagramXML: diagramXML,
-    });
+    if (!res.headersSent) {
+      res.status(500).json({
+        response: 'Error: Failed to get response from AI. Please try again.',
+        updatedDiagramXML: diagramXML,
+      });
+    }
   }
 });
 

@@ -11,7 +11,7 @@
   "license": "ISC",
   "description": "",
   "dependencies": {
-    "@google/generative-ai": "^0.24.1",
+    "@anthropic-ai/sdk": "^0.55.0",
     "@sentry/node": "^8.0.0",
     "@sentry/profiling-node": "^8.0.0",
     "cors": "^2.8.5",
