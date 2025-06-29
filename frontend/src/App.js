@@ -10,6 +10,108 @@ import 'bpmn-js/dist/assets/bpmn-font/css/bpmn.css';
 import 'bpmn-js/dist/assets/bpmn-font/css/bpmn-codes.css';
 import 'bpmn-js/dist/assets/bpmn-font/css/bpmn-embedded.css';
 
+/**
+ * Validates XML using DOM parser (client-side validation)
+ * @param {string} xmlString - The XML string to validate
+ * @returns {boolean} - True if valid, false otherwise
+ */
+function validateXML(xmlString) {
+  try {
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(xmlString, 'text/xml');
+    const errors = doc.querySelectorAll('parsererror');
+    return errors.length === 0;
+  } catch (error) {
+    console.error('XML validation error:', error);
+    return false;
+  }
+}
+
+/**
+ * Count tags programmatically for debugging
+ * @param {string} xml - The XML string to analyze
+ * @returns {object} - Tag count statistics
+ */
+function countTags(xml) {
+  if (!xml || typeof xml !== 'string') {
+    return { openTags: 0, closeTags: 0, selfClosing: 0, valid: false };
+  }
+
+  // More precise regex patterns
+  const openTagPattern = /<[^\/!?][^>]*[^\/]>/g;
+  const closeTagPattern = /<\/[^>]+>/g;
+  const selfClosingPattern = /<[^>]+\/>/g;
+  
+  const openTags = (xml.match(openTagPattern) || []).length;
+  const closeTags = (xml.match(closeTagPattern) || []).length;
+  const selfClosing = (xml.match(selfClosingPattern) || []).length;
+  
+  // Calculate expected balance
+  const expectedBalance = openTags === closeTags;
+  
+  console.log(`🔍 Frontend XML Tag Analysis:
+  - Open tags: ${openTags}
+  - Close tags: ${closeTags}
+  - Self-closing tags: ${selfClosing}
+  - Balanced: ${expectedBalance ? '✅' : '❌'}`);
+  
+  return { 
+    openTags, 
+    closeTags, 
+    selfClosing, 
+    valid: expectedBalance,
+    balance: openTags - closeTags
+  };
+}
+
+/**
+ * Comprehensive XML validation for frontend
+ * @param {string} xml - The XML string to validate
+ * @returns {object} - {valid: boolean, error: string, details: object}
+ */
+function validateBPMNXML(xml) {
+  console.log('🔍 Frontend: Starting BPMN XML validation...');
+  
+  // Basic checks
+  if (!xml || typeof xml !== 'string') {
+    return { valid: false, error: 'XML is empty or not a string', details: {} };
+  }
+
+  // DOM parser validation
+  const domValid = validateXML(xml);
+  
+  // Tag counting
+  const tagCounts = countTags(xml);
+  
+  // BPMN-specific checks
+  const hasDefinitions = xml.includes('<bpmn:definitions') && xml.includes('</bpmn:definitions>');
+  const hasProcess = xml.includes('<bpmn:process') && xml.includes('</bpmn:process>');
+  
+  const details = {
+    domValid,
+    tagCounts,
+    hasDefinitions,
+    hasProcess
+  };
+  
+  const isValid = domValid && tagCounts.valid && hasDefinitions && hasProcess;
+  
+  let error = '';
+  if (!isValid) {
+    const errors = [];
+    if (!domValid) errors.push('DOM parser failed');
+    if (!tagCounts.valid) errors.push(`Unbalanced tags (${tagCounts.balance})`);
+    if (!hasDefinitions) errors.push('Missing BPMN definitions');
+    if (!hasProcess) errors.push('Missing BPMN process');
+    error = errors.join(', ');
+  }
+  
+  console.log(`🔍 Frontend validation result: ${isValid ? '✅ VALID' : '❌ INVALID'}`);
+  if (!isValid) console.log(`🔍 Frontend validation errors: ${error}`);
+  
+  return { valid: isValid, error, details };
+}
+
 
 function App() {
   const bpmnViewerRef = useRef(null);
@@ -19,6 +121,12 @@ function App() {
   const [selectedElements, setSelectedElements] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
   const initialLoadRef = useRef(false);
+  
+  // AI Provider state
+  const [availableProviders, setAvailableProviders] = useState([]);
+  const [selectedProvider, setSelectedProvider] = useState('');
+  const [isLoadingProviders, setIsLoadingProviders] = useState(true);
+  
   const [bpmnXML, setBpmnXML] = useState(`<?xml version="1.0" encoding="UTF-8"?>
     <bpmn:definitions xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL" xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI" xmlns:dc="http://www.omg.org/spec/DD/20100524/DC" xmlns:di="http://www.omg.org/spec/DD/20100524/DI" id="Definitions_1" targetNamespace="http://bpmn.io/schema/bpmn">
       <bpmn:process id="Process_1" isExecutable="false">
@@ -64,6 +172,31 @@ function App() {
       </bpmndi:BPMNDiagram>
     </bpmn:definitions>
     `);
+
+  // Fetch available AI providers on component mount
+  useEffect(() => {
+    const fetchProviders = async () => {
+      try {
+        const response = await fetch('http://localhost:3001/api/providers');
+        const data = await response.json();
+        setAvailableProviders(data.providers);
+        setSelectedProvider(data.default);
+        setIsLoadingProviders(false);
+        console.log('Available AI providers:', data.providers);
+      } catch (error) {
+        console.error('Error fetching AI providers:', error);
+        setIsLoadingProviders(false);
+        // Capture error in Sentry
+        captureException(error, {
+          component: 'app',
+          action: 'fetch_providers',
+          backend_url: 'http://localhost:3001/api/providers'
+        });
+      }
+    };
+
+    fetchProviders();
+  }, []);
 
   useEffect(() => {
     // Only initialize the modeler once
@@ -123,16 +256,36 @@ function App() {
     // Only update if initial load is complete and this is an external XML change
     if (bpmnModelerRef.current && bpmnXML && initialLoadRef.current && !isLoading) {
       setIsLoading(true);
+      
+      // Validate XML before attempting to import
+      console.log('🔍 Frontend: Validating XML before import...');
+      const validation = validateBPMNXML(bpmnXML);
+      
+      if (!validation.valid) {
+        console.error('🔍 Frontend: XML validation failed before import:', validation);
+        setChatMessages((prevMessages) => [...prevMessages, { 
+          sender: 'llm', 
+          text: `Error: Invalid BPMN XML detected before import. ${validation.error}. The backend should have caught this - please report this issue.`
+        }]);
+        setIsLoading(false);
+        return;
+      }
+      
+      console.log('🔍 Frontend: XML validation passed, importing...');
       bpmnModelerRef.current.importXML(bpmnXML).then(function(result) {
         const { warnings } = result;
-        console.log('XML updated successfully');
+        console.log('✅ XML updated successfully');
         if (warnings.length) {
-          console.log('warnings', warnings);
+          console.log('⚠️ Import warnings:', warnings);
         }
         setIsLoading(false);
       }).catch(function(err) {
         const { message, warnings } = err;
-        console.error('Error updating BPMN XML:', message, warnings);
+        console.error('❌ Error updating BPMN XML:', message, warnings);
+        
+        // Run post-import validation for debugging
+        const postValidation = validateBPMNXML(bpmnXML);
+        console.error('🔍 Post-import validation:', postValidation);
         
         // Provide more specific error messages
         let errorMessage = 'Error updating diagram: ';
@@ -140,6 +293,8 @@ function App() {
           errorMessage += 'Invalid BPMN XML structure detected. The AI generated malformed XML. Please try again with a different description.';
         } else if (message.includes('sourceRef') || message.includes('targetRef')) {
           errorMessage += 'Invalid sequence flow references. Please try again.';
+        } else if (message.includes('duplicate id')) {
+          errorMessage += 'Duplicate element IDs detected. Please try again.';
         } else {
           errorMessage += message + '. Please try again or use the Test BPMN button to load a working diagram.';
         }
@@ -150,6 +305,15 @@ function App() {
           text: errorMessage
         }]);
         setIsLoading(false);
+        
+        // Capture error in Sentry with detailed context
+        captureException(new Error(`BPMN import failed: ${message}`), {
+          component: 'app',
+          action: 'xml_import',
+          xml_length: bpmnXML.length,
+          validation_details: postValidation,
+          bpmn_warnings: warnings
+        });
       });
     }
   }, [bpmnXML]); // Only run when bpmnXML changes
@@ -186,6 +350,7 @@ function App() {
           diagramXML: bpmnXML,
           selectedElementIds: selectedElements,
           prompt: chatInput,
+          aiProvider: selectedProvider,
         }),
       });
 
@@ -258,6 +423,25 @@ function App() {
       <div className="bpmn-container">
         <div ref={bpmnViewerRef} className="bpmn-viewer"></div>
         <div className="chat-panel">
+          <div className="ai-provider-selector">
+            <label htmlFor="ai-provider">AI Provider:</label>
+            {isLoadingProviders ? (
+              <span>Loading providers...</span>
+            ) : (
+              <select 
+                id="ai-provider"
+                value={selectedProvider} 
+                onChange={(e) => setSelectedProvider(e.target.value)}
+                disabled={isLoading}
+              >
+                {availableProviders.map((provider) => (
+                  <option key={provider.id} value={provider.id}>
+                    {provider.icon} {provider.name} - {provider.description}
+                  </option>
+                ))}
+              </select>
+            )}
+          </div>
           <div className="chat-messages">
             {chatMessages.map((message, index) => (
               <div key={index} className={`chat-message ${message.sender}`}>

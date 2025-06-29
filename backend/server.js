@@ -1,9 +1,20 @@
 // Load environment variables first
 require('dotenv').config();
 
+// Debug: Check which environment variables are loaded
+console.log('🔍 Environment Variables Debug:');
+console.log('- NODE_ENV:', process.env.NODE_ENV);
+console.log('- PORT:', process.env.PORT);
+console.log('- ANTHROPIC_API_KEY:', process.env.ANTHROPIC_API_KEY ? `Set (${process.env.ANTHROPIC_API_KEY.substring(0, 10)}...)` : 'Not set');
+console.log('- OPENAI_API_KEY:', process.env.OPENAI_API_KEY ? `Set (${process.env.OPENAI_API_KEY.substring(0, 10)}...)` : 'Not set');
+console.log('- GEMINI_API_KEY:', process.env.GEMINI_API_KEY ? `Set (${process.env.GEMINI_API_KEY.substring(0, 10)}...)` : 'Not set');
+console.log('- GROQ_API_KEY:', process.env.GROQ_API_KEY ? `Set (${process.env.GROQ_API_KEY.substring(0, 10)}...)` : 'Not set');
+console.log('- SENTRY_DSN:', process.env.SENTRY_DSN ? 'Set' : 'Not set');
+console.log('---');
+
 const express = require('express');
 const cors = require('cors');
-const Anthropic = require('@anthropic-ai/sdk');
+const { DOMParser } = require('xmldom');
 
 // Import Sentry configuration
 const { 
@@ -17,6 +28,14 @@ const {
 
 // Import BPMN prompt template
 const { generateBPMNPrompt } = require('./prompts/bpmn-assistant');
+
+// Import AI service
+const { 
+  initializeAIClients, 
+  getAvailableProviders, 
+  generateResponse, 
+  getProviderInfo 
+} = require('./ai-service');
 
 /**
  * Attempts to fix common XML quote issues
@@ -63,7 +82,171 @@ ${lastFewLines}`;
 }
 
 /**
- * Validates BPMN XML structure properly
+ * Validates XML using DOM parser
+ * @param {string} xmlString - The XML string to validate
+ * @returns {object} - {valid: boolean, errors: string[]}
+ */
+function validateXMLWithParser(xmlString) {
+  try {
+    const parser = new DOMParser({
+      errorHandler: {
+        warning: function(msg) { console.warn('XML Warning:', msg); },
+        error: function(msg) { console.error('XML Error:', msg); },
+        fatalError: function(msg) { console.error('XML Fatal Error:', msg); }
+      }
+    });
+    
+    const doc = parser.parseFromString(xmlString, 'text/xml');
+    const errors = doc.getElementsByTagName('parsererror');
+    
+    if (errors.length > 0) {
+      const errorMessages = [];
+      for (let i = 0; i < errors.length; i++) {
+        errorMessages.push(errors[i].textContent);
+      }
+      return { valid: false, errors: errorMessages };
+    }
+    
+    return { valid: true, errors: [] };
+  } catch (error) {
+    return { valid: false, errors: [error.message] };
+  }
+}
+
+/**
+ * Count tags programmatically for debugging
+ * @param {string} xml - The XML string to analyze
+ * @returns {object} - Tag count statistics
+ */
+function countTags(xml) {
+  if (!xml || typeof xml !== 'string') {
+    return { openTags: 0, closeTags: 0, selfClosing: 0, valid: false };
+  }
+
+  // More precise regex patterns
+  const openTagPattern = /<[^\/!?][^>]*[^\/]>/g;
+  const closeTagPattern = /<\/[^>]+>/g;
+  const selfClosingPattern = /<[^>]+\/>/g;
+  const xmlDeclarationPattern = /<\?xml[^>]*\?>/g;
+  
+  const openTags = (xml.match(openTagPattern) || []).length;
+  const closeTags = (xml.match(closeTagPattern) || []).length;
+  const selfClosing = (xml.match(selfClosingPattern) || []).length;
+  const xmlDeclarations = (xml.match(xmlDeclarationPattern) || []).length;
+  
+  // Calculate expected balance
+  const expectedBalance = openTags === closeTags;
+  
+  console.log(`🔍 XML Tag Analysis:
+  - Open tags: ${openTags}
+  - Close tags: ${closeTags}
+  - Self-closing tags: ${selfClosing}
+  - XML declarations: ${xmlDeclarations}
+  - Balanced: ${expectedBalance ? '✅' : '❌'}`);
+  
+  return { 
+    openTags, 
+    closeTags, 
+    selfClosing, 
+    xmlDeclarations,
+    valid: expectedBalance,
+    balance: openTags - closeTags
+  };
+}
+
+/**
+ * Comprehensive XML validation combining multiple strategies
+ * @param {string} xml - The XML string to validate
+ * @returns {object} - {valid: boolean, error: string, details: object}
+ */
+function comprehensiveXMLValidation(xml) {
+  console.log('🔍 Starting comprehensive XML validation...');
+  
+  // Strategy 1: Basic structure checks
+  const basicValidation = validateXMLStructure(xml);
+  
+  // Strategy 2: DOM parser validation
+  const parserValidation = validateXMLWithParser(xml);
+  
+  // Strategy 3: Tag counting
+  const tagCounts = countTags(xml);
+  
+  // Strategy 4: BPMN-specific validation
+  const bpmnValidation = validateBPMNSpecificStructure(xml);
+  
+  const details = {
+    basic: basicValidation,
+    parser: parserValidation,
+    tags: tagCounts,
+    bpmn: bpmnValidation
+  };
+  
+  // Determine overall validity
+  const isValid = basicValidation.valid && 
+                  parserValidation.valid && 
+                  tagCounts.valid && 
+                  bpmnValidation.valid;
+  
+  let error = '';
+  if (!isValid) {
+    const errors = [];
+    if (!basicValidation.valid) errors.push(`Basic: ${basicValidation.error}`);
+    if (!parserValidation.valid) errors.push(`Parser: ${parserValidation.errors.join(', ')}`);
+    if (!tagCounts.valid) errors.push(`Tags: ${tagCounts.balance > 0 ? 'Unclosed tags' : 'Extra closing tags'} (${Math.abs(tagCounts.balance)})`);
+    if (!bpmnValidation.valid) errors.push(`BPMN: ${bpmnValidation.error}`);
+    error = errors.join(' | ');
+  }
+  
+  console.log(`🔍 Validation Result: ${isValid ? '✅ VALID' : '❌ INVALID'}`);
+  if (!isValid) console.log(`🔍 Validation Errors: ${error}`);
+  
+  return { valid: isValid, error, details };
+}
+
+/**
+ * BPMN-specific structure validation
+ * @param {string} xml - The XML string to validate
+ * @returns {object} - {valid: boolean, error: string}
+ */
+function validateBPMNSpecificStructure(xml) {
+  if (!xml || typeof xml !== 'string') {
+    return { valid: false, error: 'XML is empty or not a string' };
+  }
+
+  // Check for required BPMN namespaces
+  const requiredNamespaces = [
+    'xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"',
+    'xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI"'
+  ];
+  
+  for (const ns of requiredNamespaces) {
+    if (!xml.includes(ns)) {
+      return { valid: false, error: `Missing required namespace: ${ns}` };
+    }
+  }
+
+  // Check for required BPMN structure
+  if (!xml.includes('<bpmn:definitions') || !xml.includes('</bpmn:definitions>')) {
+    return { valid: false, error: 'Missing BPMN definitions tags' };
+  }
+  
+  if (!xml.includes('<bpmn:process') || !xml.includes('</bpmn:process>')) {
+    return { valid: false, error: 'Missing BPMN process tags' };
+  }
+
+  // Check for at least one BPMN element
+  const bpmnElements = ['startEvent', 'endEvent', 'task', 'userTask', 'serviceTask', 'scriptTask', 'gateway'];
+  const hasElements = bpmnElements.some(element => xml.includes(`<bpmn:${element}`));
+  
+  if (!hasElements) {
+    return { valid: false, error: 'No BPMN process elements found' };
+  }
+
+  return { valid: true, error: null };
+}
+
+/**
+ * Basic XML structure validation (legacy function for compatibility)
  * @param {string} xml - The XML string to validate
  * @returns {object} - {valid: boolean, error: string}
  */
@@ -93,14 +276,6 @@ function validateXMLStructure(xml) {
     
     // For balanced XML: regular opening tags should equal closing tags
     if (regularOpenTags !== closeTags) {
-      // Find specific unmatched tags for better error reporting
-      const openTagsArray = (xml.match(/<([^/!?][^>\s]*)[^>]*>/g) || []).map(tag => tag.match(/<([^>\s]+)/)[1]);
-      const closeTagsArray = (xml.match(/<\/([^>]+)>/g) || []).map(tag => tag.match(/<\/([^>]+)>/)[1]);
-      const selfClosingArray = (xml.match(/<([^>]*)\s*\/>/g) || []).map(tag => tag.match(/<([^>\s]+)/)[1]);
-      
-      // Remove self-closing tags from open tags
-      const regularOpenArray = openTagsArray.filter(tag => !selfClosingArray.includes(tag));
-      
       return { 
         valid: false, 
         error: `Unbalanced tags: ${regularOpenTags} regular open, ${closeTags} close, ${selfClosingTags} self-closing. Check for unclosed tags near the end of the XML.` 
@@ -110,25 +285,6 @@ function validateXMLStructure(xml) {
     // Check for common XML syntax errors
     if (xml.includes('<<') || xml.includes('>>')) {
       return { valid: false, error: 'Invalid XML syntax: double angle brackets' };
-    }
-
-    // Check for unclosed quotes in attributes (improved)
-    const quoteMatches = xml.match(/="/g);
-    const quoteCount = quoteMatches ? quoteMatches.length : 0;
-    const closingQuotes = (xml.match(/"\s*[/>]/g) || []).length + (xml.match(/"\s*\w/g) || []).length;
-    
-    if (quoteCount !== closingQuotes) {
-      // Try to find the specific problematic attribute
-      const problematicLines = xml.split('\n').filter(line => {
-        const lineQuotes = (line.match(/="/g) || []).length;
-        const lineClosing = (line.match(/"\s*[/>]/g) || []).length + (line.match(/"\s*\w/g) || []).length;
-        return lineQuotes !== lineClosing;
-      });
-      
-      return { 
-        valid: false, 
-        error: `Unclosed quotes in XML attributes. Problematic line(s): ${problematicLines.slice(0, 2).join('; ')}` 
-      };
     }
 
     return { valid: true, error: null };
@@ -152,17 +308,18 @@ if (sentryEnabled) {
 app.use(cors());
 app.use(express.json());
 
-// Access your API key as an environment variable (recommended)
-const API_KEY = process.env.ANTHROPIC_API_KEY;
+// Initialize AI clients
+const aiClients = initializeAIClients();
+const availableProviders = getAvailableProviders(aiClients);
+const providerInfo = getProviderInfo();
 
-if (!API_KEY) {
-  console.error('ANTHROPIC_API_KEY environment variable is not set.');
+console.log(`🤖 Available AI providers: ${availableProviders.join(', ')}`);
+
+if (availableProviders.length === 0) {
+  console.error('❌ No AI providers configured. Please set at least one API key in environment variables.');
+  console.error('Required environment variables: ANTHROPIC_API_KEY, OPENAI_API_KEY, GEMINI_API_KEY, or GROQ_API_KEY');
   process.exit(1);
 }
-
-const anthropic = new Anthropic({
-  apiKey: API_KEY,
-});
 
 app.get('/', (req, res) => {
   res.send('Hello from the backend!');
@@ -224,38 +381,47 @@ app.get('/api/test-bpmn', (req, res) => {
 app.post('/api/chat', async (req, res) => {
   const startTime = Date.now();
   const { diagramXML, selectedElementIds, prompt } = req.body;
+  let responseHandled = false; // Track if response has been sent
 
-  // Add request timeout
+  // Add request timeout - increased for complex AI processing
   const timeout = setTimeout(() => {
-    if (!res.headersSent) {
+    if (!responseHandled && !res.headersSent) {
+      responseHandled = true;
+      console.log(`⏰ Request timeout after 45 seconds for prompt: "${prompt.substring(0, 50)}..."`);
       res.status(408).json({
-        response: 'Request timeout - AI took too long to respond. Please try again.',
+        response: 'Request timeout - AI took too long to respond. Please try with a simpler request or try again.',
         updatedDiagramXML: diagramXML,
       });
     }
-  }, 30000); // 30 second timeout
+  }, 45000); // 45 second timeout (increased from 30)
 
   const fullPrompt = generateBPMNPrompt(diagramXML, selectedElementIds, prompt);
   
   console.log(`🚀 Processing request: "${prompt.substring(0, 50)}..." (prompt length: ${fullPrompt.length} chars)`);
+  console.log(`📊 Request details: diagram size=${diagramXML?.length || 0}, selected elements=${selectedElementIds?.length || 0}`);
   
   try {
-    const result = await anthropic.messages.create({
-      model: "claude-3-5-sonnet-20241022",
-      max_tokens: 4000,
-      messages: [
-        {
-          role: "user",
-          content: fullPrompt
-        }
-      ]
-    });
+    const aiStartTime = Date.now();
+    const provider = req.body.aiProvider || availableProviders[0]; // Use first available provider as default
+    const text = await generateResponse(aiClients, provider, fullPrompt);
     
-    const text = result.content[0].text;
+    const aiResponseTime = Date.now() - aiStartTime;
+    console.log(`🤖 AI response received from ${provider} in ${aiResponseTime}ms`);
+    
+    // Warn about slow AI responses
+    if (aiResponseTime > 20000) {
+      console.warn(`⚠️ Slow AI response detected (${aiResponseTime}ms). Consider optimizing prompt or checking AI service status.`);
+    }
     
     clearTimeout(timeout); // Clear timeout on successful response
 
-    // Attempt to parse the JSON response from Claude
+    // Check if response was already sent by timeout
+    if (responseHandled || res.headersSent) {
+      console.log('⚠️ Response already sent, skipping...');
+      return;
+    }
+
+    // Attempt to parse the JSON response from AI
     let llmResponse;
     try {
       // Attempt to extract JSON from markdown code block
@@ -266,8 +432,29 @@ app.post('/api/chat', async (req, res) => {
         // If not in markdown, try parsing directly
         llmResponse = JSON.parse(text);
       }
+
+      // Handle batched XML responses
+      if (llmResponse.xmlBatched && llmResponse.xmlBatchCount) {
+        console.log(`🔧 Reconstructing batched XML with ${llmResponse.xmlBatchCount} parts`);
+        let reconstructedXML = '';
+        
+        for (let i = 1; i <= llmResponse.xmlBatchCount; i++) {
+          const batchKey = `xmlBatch${i}`;
+          if (llmResponse[batchKey]) {
+            reconstructedXML += llmResponse[batchKey];
+          } else {
+            console.warn(`⚠️ Missing batch part: ${batchKey}`);
+          }
+        }
+        
+        if (reconstructedXML) {
+          llmResponse.updatedDiagramXML = reconstructedXML;
+          console.log(`✅ Reconstructed XML from ${llmResponse.xmlBatchCount} batches, total length: ${reconstructedXML.length}`);
+        }
+      }
+      
     } catch (parseError) {
-      console.error('Failed to parse Claude response as JSON:', text);
+      console.error('Failed to parse AI response as JSON:', text);
       // If parsing fails, treat the entire text as the LLM's response
       llmResponse = {
         updatedDiagramXML: diagramXML, // Return original XML if parsing fails
@@ -288,40 +475,81 @@ app.post('/api/chat', async (req, res) => {
     let finalXML = diagramXML; // Default to original XML
     if (llmResponse.updatedDiagramXML) {
       let xmlToValidate = llmResponse.updatedDiagramXML;
-      let validation = validateXMLStructure(xmlToValidate);
       
-      // If validation fails, try to sanitize and validate again
-      if (!validation.valid && validation.error.includes('quote')) {
-        console.log('🔧 Attempting to fix XML quote issues...');
-        xmlToValidate = sanitizeXML(llmResponse.updatedDiagramXML);
-        validation = validateXMLStructure(xmlToValidate);
+      console.log('🔍 Starting comprehensive XML validation...');
+      console.log(`🔍 XML Length: ${xmlToValidate.length} characters`);
+      
+      // Use comprehensive validation
+      let validation = comprehensiveXMLValidation(xmlToValidate);
+      
+      // If validation fails, try multiple repair strategies
+      if (!validation.valid) {
+        console.log('🔧 Attempting XML repair strategies...');
         
-        if (validation.valid) {
-          console.log('✅ XML fixed successfully after sanitization');
+        // Strategy 1: Basic sanitization (quotes, truncation, etc.)
+        console.log('🔧 Strategy 1: Basic sanitization...');
+        xmlToValidate = sanitizeXML(llmResponse.updatedDiagramXML);
+        validation = comprehensiveXMLValidation(xmlToValidate);
+        
+        // Strategy 2: If still invalid, try to extract and rebuild from process
+        if (!validation.valid && xmlToValidate.includes('<bpmn:process')) {
+          console.log('🔧 Strategy 2: Rebuilding from process section...');
+          try {
+            const processMatch = xmlToValidate.match(/<bpmn:process[\s\S]*?<\/bpmn:process>/);
+            if (processMatch) {
+              // Create a minimal valid BPMN with just the process
+              xmlToValidate = `<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" 
+                  xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL" 
+                  xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI" 
+                  xmlns:dc="http://www.omg.org/spec/DD/20100524/DC" 
+                  xmlns:di="http://www.omg.org/spec/DD/20100524/DI" 
+                  id="Definitions_1" 
+                  targetNamespace="http://bpmn.io/schema/bpmn">
+  ${processMatch[0]}
+  <bpmndi:BPMNDiagram id="BPMNDiagram_1">
+    <bpmndi:BPMNPlane id="BPMNPlane_1" bpmnElement="Process_1">
+    </bpmndi:BPMNPlane>
+  </bpmndi:BPMNDiagram>
+</bpmn:definitions>`;
+              validation = comprehensiveXMLValidation(xmlToValidate);
+              if (validation.valid) {
+                console.log('✅ XML rebuilt successfully from process section');
+                llmResponse.response = (llmResponse.response || '') + ' [Note: Diagram layout was simplified due to XML issues]';
+              }
+            }
+          } catch (rebuildError) {
+            console.error('❌ Failed to rebuild XML:', rebuildError.message);
+          }
         }
       }
       
       if (validation.valid) {
         finalXML = xmlToValidate;
-        console.log('✅ Generated XML validated successfully');
+        console.log('✅ Final XML validation successful');
       } else {
-        console.error('❌ Invalid XML generated by AI:', {
+        console.error('❌ All XML repair strategies failed:', {
           error: validation.error,
+          details: validation.details,
           xmlPreview: llmResponse.updatedDiagramXML.substring(0, 200) + '...',
           xmlLength: llmResponse.updatedDiagramXML.length
         });
         console.error('📊 XML Structure Analysis:', analyzeXMLStructure(llmResponse.updatedDiagramXML));
-        llmResponse.response = (llmResponse.response || '') + ` [Note: Generated XML was invalid (${validation.error}), keeping original diagram]`;
+        llmResponse.response = (llmResponse.response || '') + ` [Note: Generated XML was invalid and could not be repaired (${validation.error}), keeping original diagram]`;
       }
     }
 
     const responseTime = Date.now() - startTime;
-    console.log(`✅ Request completed in ${responseTime}ms`);
+    console.log(`✅ Request completed in ${responseTime}ms (AI: ${aiResponseTime}ms, Processing: ${responseTime - aiResponseTime}ms)`);
 
-    res.json({
-      response: llmResponse.response || llmResponse.impactAnalysis || 'No specific response provided.',
-      updatedDiagramXML: finalXML,
-    });
+    // Final check before sending response
+    if (!responseHandled && !res.headersSent) {
+      responseHandled = true;
+      res.json({
+        response: llmResponse.response || llmResponse.impactAnalysis || 'No specific response provided.',
+        updatedDiagramXML: finalXML,
+      });
+    }
 
   } catch (error) {
     clearTimeout(timeout); // Clear timeout on error
@@ -334,16 +562,30 @@ app.post('/api/chat', async (req, res) => {
       user_prompt: prompt,
       selected_elements: selectedElementIds,
       diagram_length: diagramXML?.length || 0,
-      response_time: responseTime
+      response_time: responseTime,
+      ai_provider: req.body.aiProvider || availableProviders[0]
     });
     
-    if (!res.headersSent) {
+    // Only send error response if not already handled
+    if (!responseHandled && !res.headersSent) {
+      responseHandled = true;
       res.status(500).json({
         response: 'Error: Failed to get response from AI. Please try again.',
         updatedDiagramXML: diagramXML,
       });
     }
   }
+});
+
+// API endpoint to get available AI providers
+app.get('/api/providers', (req, res) => {
+  res.json({
+    providers: availableProviders.map(provider => ({
+      id: provider,
+      ...providerInfo[provider]
+    })),
+    default: availableProviders[0]
+  });
 });
 
 // Sentry error handler (automatic in v8+ but keeping for compatibility)
@@ -367,6 +609,7 @@ app.listen(port, () => {
   // Log successful startup to Sentry
   captureMessage(`Backend server started successfully on port ${port}`, 'info', {
     port: port,
-    environment: process.env.NODE_ENV || 'development'
+    environment: process.env.NODE_ENV || 'development',
+    available_providers: availableProviders
   });
 });

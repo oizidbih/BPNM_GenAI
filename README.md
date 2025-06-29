@@ -1,11 +1,12 @@
 # BPMN AI Editor
 
-An intelligent BPMN (Business Process Model and Notation) diagram editor powered by Anthropic Claude AI. This application allows users to create, edit, and modify BPMN diagrams through natural language conversations with an AI assistant.
+An intelligent BPMN (Business Process Model and Notation) diagram editor powered by multiple AI providers. This application allows users to create, edit, and modify BPMN diagrams through natural language conversations with their choice of AI assistant including Anthropic Claude, OpenAI GPT-4o, Google Gemini, or Groq Llama.
 
 ## 🚀 Features
 
 - **Interactive BPMN Editor**: Full-featured BPMN 2.0 compliant diagram editor using bpmn-js
-- **AI-Powered Assistant**: Natural language processing for diagram modifications using Anthropic Claude
+- **Multiple AI Providers**: Choose from Anthropic Claude, OpenAI GPT-4o, Google Gemini, or Groq Llama
+- **AI-Powered Assistant**: Natural language processing for diagram modifications
 - **Real-time Collaboration**: Chat interface for seamless interaction with the AI
 - **Context-Aware Processing**: AI understands selected elements and provides targeted suggestions
 - **Impact Analysis**: Intelligent analysis of how changes affect the overall process flow
@@ -21,7 +22,11 @@ An intelligent BPMN (Business Process Model and Notation) diagram editor powered
 
 ### Backend (Node.js/Express)
 - Express 5.1.0 server with CORS support
-- Anthropic Claude AI integration (claude-3-5-sonnet model)
+- Multiple AI provider integrations:
+  - Anthropic Claude (claude-3-5-sonnet-20241022)
+  - OpenAI GPT-4o
+  - Google Gemini (gemini-1.5-pro)
+  - Groq Llama (llama-3.1-70b-versatile)
 - RESTful API for diagram processing
 - JSON-based communication protocol
 
@@ -29,7 +34,7 @@ An intelligent BPMN (Business Process Model and Notation) diagram editor powered
 
 - Node.js (v16 or higher)
 - npm or yarn
-- Anthropic Claude API key
+- At least one AI provider API key (Anthropic, OpenAI, Gemini, or Groq)
 
 ## 🛠️ Installation
 
@@ -55,14 +60,17 @@ An intelligent BPMN (Business Process Model and Notation) diagram editor powered
    
    **Backend (.env file in backend directory):**
    ```bash
-   # Anthropic Claude AI Configuration
+   # AI Provider API Keys (at least one required)
    ANTHROPIC_API_KEY=your_anthropic_api_key_here
+   OPENAI_API_KEY=your_openai_api_key_here
+   GEMINI_API_KEY=your_gemini_api_key_here
+   GROQ_API_KEY=your_groq_api_key_here
    
-   # Sentry Configuration
-   SENTRY_DSN=https://32dc66ac426344352ff8953ddef755c0@o4509520289202176.ingest.de.sentry.io/4509571066822736
+   # Sentry Configuration (Optional)
+   SENTRY_DSN=your_sentry_dsn_here
    SENTRY_ENVIRONMENT=development
    SENTRY_TRACES_SAMPLE_RATE=1.0
-   SENTRY_DEBUG_MODE=true
+   SENTRY_DEBUG_MODE=false
    
    # Server Configuration
    PORT=3001
@@ -101,6 +109,7 @@ An intelligent BPMN (Business Process Model and Notation) diagram editor powered
 3. **Using the Application**
    - The left panel shows the BPMN diagram editor
    - The right panel contains the AI chat interface
+   - **Select AI Provider**: Choose your preferred AI provider from the dropdown
    - Select elements in the diagram to provide context to the AI
    - Type natural language requests in the chat to modify the diagram
    - The AI will respond with explanations and update the diagram accordingly
@@ -128,7 +137,50 @@ The AI assistant can:
 - "How does this task connect to other elements?"
 - "What are the best practices for this type of process?"
 
+## 🤖 AI Provider Selection
+
+The application automatically detects available AI providers based on configured API keys and allows users to switch between them:
+
+### Anthropic Claude
+- **Model**: claude-3-5-sonnet-20241022
+- **Strengths**: Complex reasoning, code generation, detailed analysis
+- **Best for**: Sophisticated BPMN modifications and explanations
+
+### OpenAI GPT-4o
+- **Model**: gpt-4o
+- **Strengths**: General-purpose AI with strong BPMN knowledge
+- **Best for**: Balanced performance across all tasks
+
+### Google Gemini
+- **Model**: gemini-1.5-pro
+- **Strengths**: Fast response times, efficient processing
+- **Best for**: Quick iterations and rapid prototyping
+
+### Groq Llama
+- **Model**: llama-3.1-70b-versatile
+- **Strengths**: Ultra-fast inference, open-source
+- **Best for**: High-frequency interactions and real-time collaboration
+
 ## 🔧 API Endpoints
+
+### GET `/api/providers`
+Get available AI providers and their information.
+
+**Response:**
+```json
+{
+  "providers": [
+    {
+      "id": "anthropic",
+      "name": "Anthropic Claude",
+      "model": "claude-3-5-sonnet-20241022",
+      "description": "Best for complex reasoning and code generation",
+      "icon": "🤖"
+    }
+  ],
+  "default": "anthropic"
+}
+```
 
 ### POST `/api/chat`
 Processes chat messages and diagram modifications.
@@ -138,7 +190,8 @@ Processes chat messages and diagram modifications.
 {
   "diagramXML": "string",
   "selectedElementIds": ["array", "of", "ids"],
-  "prompt": "string"
+  "prompt": "string",
+  "aiProvider": "anthropic"
 }
 ```
 

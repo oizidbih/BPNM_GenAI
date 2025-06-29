@@ -12,10 +12,14 @@
   "description": "",
   "dependencies": {
     "@anthropic-ai/sdk": "^0.55.0",
+    "@google/generative-ai": "^0.24.1",
     "@sentry/node": "^8.0.0",
     "@sentry/profiling-node": "^8.0.0",
     "cors": "^2.8.5",
     "dotenv": "^16.0.0",
-    "express": "^5.1.0"
+    "express": "^5.1.0",
+    "groq-sdk": "^0.26.0",
+    "openai": "^5.8.2",
+    "xmldom": "^0.6.0"
   }
 }
